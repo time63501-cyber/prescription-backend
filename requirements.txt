@@ -2,6 +2,9 @@
 flask>=3.0.0
 werkzeug>=3.0.0
 
+# Production Server (Required for Railway)
+gunicorn>=20.1.0
+
 # OCR
 pytesseract>=0.3.13
 
