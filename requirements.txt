@@ -9,7 +9,7 @@ gunicorn>=21.2.0
 # ── Environment variables ─────────────────────────────────────────
 python-dotenv>=1.0.0
 
-# ── OCR (Python wrapper — needs system Tesseract, see nixpacks.toml) ──
+# ── OCR ───────────────────────────────────────────────────────────
 pytesseract>=0.3.13
 
 # ── Image processing ──────────────────────────────────────────────

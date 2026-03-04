@@ -18,6 +18,22 @@ import platform
 
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+else:
+    # Try shutil.which first (works if tesseract is in PATH)
+    tess = shutil.which("tesseract")
+    if tess:
+        pytesseract.pytesseract.tesseract_cmd = tess
+    else:
+        # Common fallback paths on Debian/Ubuntu/Nix
+        for path in [
+            "/usr/bin/tesseract",
+            "/usr/local/bin/tesseract",
+            "/nix/var/nix/profiles/default/bin/tesseract",
+        ]:
+            if os.path.exists(path):
+                pytesseract.pytesseract.tesseract_cmd = path
+                break
+
 
 # ── Railway/Linux: tesseract is in PATH, no path config needed.
 # ── For local Windows dev only, uncomment:

@@ -1,6 +1,2 @@
-# nixpacks.toml — place this in your backend/ root folder
-# Tells Railway's Nixpacks builder to install the Tesseract OCR binary
-# before Python packages are installed.
-
 [phases.setup]
-nixPkgs = ["tesseract", "tesseract-lang"]
+nixPkgs = ["tesseract5"]
