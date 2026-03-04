@@ -1,16 +1,18 @@
-# ── Web framework ────────────────────────────────────────────────
+# ── Web framework ─────────────────────────────────────────────────
 flask>=3.0.0
 werkzeug>=3.0.0
-flask-cors>=4.0.0          # REQUIRED: fixes "No module named 'flask_cors'"
+flask-cors>=4.0.0
 
-# ── WSGI server (Railway) ─────────────────────────────────────────
+# ── WSGI server ───────────────────────────────────────────────────
 gunicorn>=21.2.0
 
-# ── OCR ───────────────────────────────────────────────────────────
+# ── Environment variables ─────────────────────────────────────────
+python-dotenv>=1.0.0
+
+# ── OCR (Python wrapper — needs system Tesseract, see nixpacks.toml) ──
 pytesseract>=0.3.13
 
 # ── Image processing ──────────────────────────────────────────────
-# headless build = no GUI/display deps (safe for Railway/Docker)
 opencv-python-headless>=4.9.0
 Pillow>=10.3.0
 numpy>=1.26.0
