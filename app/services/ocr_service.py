@@ -17,24 +17,45 @@ import pytesseract
 import platform
 import shutil
 import os
+import subprocess
 
+
+# ── Auto-detect Tesseract binary path ─────────────────────────────
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 else:
-    # Try shutil.which first (works if tesseract is in PATH)
+    # Try PATH first
     tess = shutil.which("tesseract")
     if tess:
         pytesseract.pytesseract.tesseract_cmd = tess
+        print(f"[Tesseract] Found via PATH: {tess}")
     else:
-        # Common fallback paths on Debian/Ubuntu/Nix
-        for path in [
+        # Fallback: common Linux install locations
+        candidates = [
             "/usr/bin/tesseract",
             "/usr/local/bin/tesseract",
-            "/nix/var/nix/profiles/default/bin/tesseract",
-        ]:
+            "/usr/share/tesseract-ocr/5/tessdata/../../../bin/tesseract",
+        ]
+        for path in candidates:
             if os.path.exists(path):
                 pytesseract.pytesseract.tesseract_cmd = path
+                print(f"[Tesseract] Found via fallback: {path}")
                 break
+        else:
+            # Last resort: ask the shell
+            try:
+                result = subprocess.run(
+                    ["which", "tesseract"], capture_output=True, text=True
+                )
+                found = result.stdout.strip()
+                if found:
+                    pytesseract.pytesseract.tesseract_cmd = found
+                    print(f"[Tesseract] Found via which: {found}")
+                else:
+                    print("[Tesseract] WARNING: could not locate tesseract binary!")
+            except Exception as e:
+                print(f"[Tesseract] ERROR locating binary: {e}")
+
 
 
 # ── Railway/Linux: tesseract is in PATH, no path config needed.
