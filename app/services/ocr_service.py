@@ -16,6 +16,7 @@ import numpy as np
 import pytesseract
 import platform
 import shutil
+import os
 
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
