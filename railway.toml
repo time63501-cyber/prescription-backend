@@ -1,0 +1,12 @@
+[build]
+builder = "railpack"
+
+[build.packages]
+tesseract-ocr = "*"
+tesseract-ocr-eng = "*"
+libgl1 = "*"
+libglib2.0-0 = "*"
+
+[deploy]
+startCommand = "gunicorn run:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120"
+restartPolicyType = "on_failure"
