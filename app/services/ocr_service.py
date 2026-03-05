@@ -20,49 +20,120 @@ import os
 import subprocess
 
 
-# ── Auto-detect Tesseract binary path ─────────────────────────────
-if platform.system() == "Windows":
-    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-else:
-    # Try PATH first
-    tess = shutil.which("tesseract")
-    if tess:
-        pytesseract.pytesseract.tesseract_cmd = tess
-        print(f"[Tesseract] Found via PATH: {tess}")
+# ─────────────────────────────────────────────────────────────────
+# Tesseract setup — runs once at module import time
+# Handles Windows local dev + Railway/Linux auto-install via apt-get
+# ─────────────────────────────────────────────────────────────────
+
+def _find_tesseract():
+    """Return path to tesseract binary, or None if not found."""
+    # 1. Check PATH (fastest — works if nixpacks/railpack installed it)
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    # 2. Known fixed paths on Debian/Ubuntu/Railway containers
+    for p in [
+        "/usr/bin/tesseract",
+        "/usr/local/bin/tesseract",
+        "/bin/tesseract",
+        "/opt/homebrew/bin/tesseract",
+        "/nix/var/nix/profiles/default/bin/tesseract",
+    ]:
+        if os.path.exists(p):
+            return p
+    # 3. Slow but thorough filesystem search
+    try:
+        r = subprocess.run(
+            ["find", "/usr", "-name", "tesseract", "-type", "f"],
+            capture_output=True, text=True, timeout=8
+        )
+        lines = [l.strip() for l in r.stdout.splitlines() if l.strip()]
+        if lines:
+            return lines[0]
+    except Exception:
+        pass
+    return None
+
+
+def _verify(path):
+    try:
+        r = subprocess.run([path, "--version"], capture_output=True, text=True)
+        line = (r.stderr or r.stdout).splitlines()[0]
+        print(f"[Tesseract] {line}")
+    except Exception as e:
+        print(f"[Tesseract] version check error: {e}")
+
+
+def _dump_debug():
+    print("[Tesseract] === DEBUG ===")
+    for cmd in [
+        ["which", "tesseract"],
+        ["find", "/usr", "-name", "tesseract"],
+        ["dpkg", "-l", "tesseract*"],
+        ["ls", "/usr/bin/"],
+    ]:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            print(f"  {' '.join(cmd)}: {(r.stdout or r.stderr).strip()[:200] or '(empty)'}")
+        except Exception as e:
+            print(f"  {' '.join(cmd)}: {e}")
+    print("[Tesseract] ================")
+
+
+def _setup_tesseract():
+    # ── Windows: use local installer path ─────────────────────────
+    if platform.system() == "Windows":
+        pytesseract.pytesseract.tesseract_cmd = (
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        )
+        print("[Tesseract] Windows: using local install")
+        return
+
+    # ── Linux/Mac: check if already available ─────────────────────
+    found = _find_tesseract()
+    if found:
+        pytesseract.pytesseract.tesseract_cmd = found
+        print(f"[Tesseract] Found: {found}")
+        _verify(found)
+        return
+
+    # ── Not found: install via apt-get at runtime ──────────────────
+    # This is the guaranteed fallback for Railway containers
+    print("[Tesseract] Not in PATH — running apt-get install...")
+    try:
+        subprocess.run(["apt-get", "update", "-qq"],
+                       check=True, timeout=60)
+        subprocess.run(
+            ["apt-get", "install", "-y", "--no-install-recommends",
+             "tesseract-ocr", "tesseract-ocr-eng",
+             "libgl1", "libglib2.0-0"],
+            check=True, timeout=120
+        )
+        print("[Tesseract] apt-get install done")
+    except subprocess.CalledProcessError as e:
+        print(f"[Tesseract] apt-get failed (exit {e.returncode}): {e}")
+    except subprocess.TimeoutExpired:
+        print("[Tesseract] apt-get timed out after 120s")
+    except FileNotFoundError:
+        print("[Tesseract] apt-get binary not found on this system")
+    except Exception as e:
+        print(f"[Tesseract] apt-get unexpected error: {e}")
+
+    # ── Re-search after install attempt ───────────────────────────
+    found = _find_tesseract()
+    if found:
+        pytesseract.pytesseract.tesseract_cmd = found
+        print(f"[Tesseract] Now available: {found}")
+        _verify(found)
     else:
-        # Fallback: common Linux install locations
-        candidates = [
-            "/usr/bin/tesseract",
-            "/usr/local/bin/tesseract",
-            "/usr/share/tesseract-ocr/5/tessdata/../../../bin/tesseract",
-        ]
-        for path in candidates:
-            if os.path.exists(path):
-                pytesseract.pytesseract.tesseract_cmd = path
-                print(f"[Tesseract] Found via fallback: {path}")
-                break
-        else:
-            # Last resort: ask the shell
-            try:
-                result = subprocess.run(
-                    ["which", "tesseract"], capture_output=True, text=True
-                )
-                found = result.stdout.strip()
-                if found:
-                    pytesseract.pytesseract.tesseract_cmd = found
-                    print(f"[Tesseract] Found via which: {found}")
-                else:
-                    print("[Tesseract] WARNING: could not locate tesseract binary!")
-            except Exception as e:
-                print(f"[Tesseract] ERROR locating binary: {e}")
+        print("[Tesseract] FATAL: tesseract still not found — dumping debug info")
+        _dump_debug()
 
 
-
-# ── Railway/Linux: tesseract is in PATH, no path config needed.
-# ── For local Windows dev only, uncomment:
-# pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+_setup_tesseract()
 
 
+# ─────────────────────────────────────────────────────────────────
 class OCRService:
 
     # ──────────────────────────────────────────────
@@ -94,10 +165,10 @@ class OCRService:
 
     def _strategy_sharpen(self, bgr):
         """Upscale → unsharp mask — helps with slightly blurry phone photos."""
-        gray   = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-        up     = self._upscale(gray)
-        blur   = cv2.GaussianBlur(up, (0, 0), 3)
-        sharp  = cv2.addWeighted(up, 1.5, blur, -0.5, 0)
+        gray  = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        up    = self._upscale(gray)
+        blur  = cv2.GaussianBlur(up, (0, 0), 3)
+        sharp = cv2.addWeighted(up, 1.5, blur, -0.5, 0)
         _, thresh = cv2.threshold(sharp, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         return thresh
 
@@ -106,10 +177,10 @@ class OCRService:
         if bgr is None:
             raise ValueError(f"Cannot read image at path: {image_path}")
         return [
-            ("otsu",          self._strategy_otsu(bgr)),
-            ("denoise_otsu",  self._strategy_denoise_otsu(bgr)),
-            ("plain",         self._strategy_plain(bgr)),
-            ("sharpen_otsu",  self._strategy_sharpen(bgr)),
+            ("otsu",         self._strategy_otsu(bgr)),
+            ("denoise_otsu", self._strategy_denoise_otsu(bgr)),
+            ("plain",        self._strategy_plain(bgr)),
+            ("sharpen_otsu", self._strategy_sharpen(bgr)),
         ]
 
     # ──────────────────────────────────────────────
@@ -134,10 +205,9 @@ class OCRService:
         Minimum confidence threshold: 20.
         """
         strategies = self._get_strategies(image_path)
-        # token_lower → list of (original_case_text, confidence)
-        token_map = {}
+        token_map  = {}
+        errors     = []
 
-        errors = []
         for name, processed in strategies:
             for psm in [6, 4]:
                 try:
@@ -146,7 +216,6 @@ class OCRService:
                         text = raw.strip()
                         if not text:
                             continue
-                        # Tesseract returns -1 for block/line-level rows — skip those
                         try:
                             conf = int(raw_conf)
                         except (ValueError, TypeError):
@@ -160,7 +229,6 @@ class OCRService:
         if errors:
             print(f"[OCR] Non-fatal strategy errors: {errors}")
 
-        # Deduplicate: best spelling + average confidence
         result = []
         for _key, entries in token_map.items():
             best_text = max(entries, key=lambda x: x[1])[0]
