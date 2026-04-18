@@ -16,12 +16,8 @@ from difflib import get_close_matches, SequenceMatcher
 # Reference tables  (extend as needed)
 # ──────────────────────────────────────────────────────────────────
 
-KNOWN_MEDICINES = [
-    "Betaloc", "Dorzolamidum", "Cimetidine", "Oxprelol",
-    "Paracetamol", "Ibuprofen", "Amoxicillin", "Azithromycin",
-    "Metformin", "Omeprazole", "Montac D", "Dolo", "Citrizin",
-    "Cetirizine", "Dolo 650", "Pan D"
-]
+from app.services.medicine_db import MEDICINE_INFO
+KNOWN_MEDICINES = list(MEDICINE_INFO.keys())
 
 # Raw OCR variant (lowercase) → canonical label
 FREQ_MAP = {

@@ -172,6 +172,28 @@ class OCRService:
         _, thresh = cv2.threshold(sharp, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         return thresh
 
+    def _strategy_handwriting_enhanced(self, bgr):
+        """
+        Advanced preprocessing for messy/thin handwriting photographed on phones.
+        Uses adaptive thresholding to handle uneven shadows, and morphological 
+        dilation to aggressively thicken pen strokes for Tesseract.
+        """
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        up   = self._upscale(gray)
+        
+        # 1. Adaptive thresholding handles uneven camera lighting significantly better than Otsu
+        thresh = cv2.adaptiveThreshold(
+            up, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10
+        )
+        
+        # 2. Morphological dilation to thicken thin cursive strokes
+        kernel = np.ones((2, 2), np.uint8)
+        inv_thresh = 255 - thresh               # Invert: text becomes white
+        dilated = cv2.dilate(inv_thresh, kernel, iterations=1)
+        final_image = 255 - dilated             # Invert back: text is black
+        
+        return final_image
+
     def _get_strategies(self, image_path):
         bgr = cv2.imread(image_path)
         if bgr is None:
@@ -208,7 +230,7 @@ class OCRService:
         if bgr is None:
             raise ValueError(f"Cannot read image at path: {image_path}")
             
-        processed = self._strategy_otsu(bgr)
+        processed = self._strategy_handwriting_enhanced(bgr)
         
         token_map = {}
         best_text = ""
