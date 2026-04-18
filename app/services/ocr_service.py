@@ -18,6 +18,7 @@ import platform
 import shutil
 import os
 import subprocess
+import requests
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -230,7 +231,7 @@ class OCRService:
         if bgr is None:
             raise ValueError(f"Cannot read image at path: {image_path}")
             
-        processed = self._strategy_handwriting_enhanced(bgr)
+        processed = self._strategy_otsu(bgr)
         
         token_map = {}
         best_text = ""
@@ -269,9 +270,48 @@ class OCRService:
             tokens.append((best_token_text, avg_t_conf))
             
         tokens.sort(key=lambda x: -x[1])
-        print(f"[OCR] Extracted {len(tokens)} unique tokens")
-        print(f"[OCR] Full text (avg_conf={avg_conf:.1f}):\n{best_text[:300]}")
+        print(f"[OCR.Local] Extracted {len(tokens)} unique tokens")
+        print(f"[OCR.Local] Full text (avg_conf={avg_conf:.1f}):\n{best_text[:300]}")
         
         return tokens, best_text, avg_conf
+
+    def process_image_cloud(self, image_path, api_key="K86023808588957"):
+        """
+        Extracts token list and string using the OCR.space Engine 2.
+        Engine 2 mathematically excels at handwriting and numerical receipts.
+        """
+        try:
+            print("[OCR.Cloud] Sending to OCR.space Engine 2...")
+            with open(image_path, 'rb') as f:
+                r = requests.post(
+                    'https://api.ocr.space/parse/image',
+                    files={'filename': f},
+                    data={
+                        'apikey': api_key,
+                        'language': 'eng',
+                        'OCREngine': '2',
+                        'scale': 'true',
+                    },
+                    timeout=25
+                )
+            
+            res = r.json()
+            if not res.get("IsErroredOnProcessing") and res.get("ParsedResults"):
+                best_text = res["ParsedResults"][0].get("ParsedText", "")
+                
+                # Mock high-confidence tokens to fit identically into the system
+                tokens = []
+                for word in best_text.split():
+                    clean_word = word.strip().lower()
+                    if len(clean_word) > 2:
+                        tokens.append((clean_word, 95.0))
+                
+                print(f"[OCR.Cloud] Extracted {len(tokens)} unique tokens")
+                return tokens, best_text, 95.0
+                
+        except Exception as e:
+            print(f"[OCR.Cloud] Request blocked or failed: {e}")
+            
+        return [], "", 0.0
 
 ocr_service = OCRService()

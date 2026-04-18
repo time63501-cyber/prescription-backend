@@ -79,13 +79,42 @@ def analyze_prescription():
     filepath_to_clean = filepath
 
     try:
-        # ── 3. OCR ────────────────────────────────────────────────
-        tokens_with_conf, full_text, overall_conf = ocr_service.process_image(filepath)
+        # ── 3. Parallel OCR Race ──────────────────────────────────
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future_local = executor.submit(ocr_service.process_image, filepath)
+            future_cloud = executor.submit(ocr_service.process_image_cloud, filepath)
+            
+            local_tokens, local_text, local_conf = future_local.result()
+            cloud_tokens, cloud_text, cloud_conf = future_cloud.result()
 
-        # ── 4. Parse ──────────────────────────────────────────────
-        primary   = extract_medicines_from_tokens(tokens_with_conf)
-        fallback  = extract_medicines_from_text(full_text, overall_conf)
-        meds      = merge_medicine_lists(primary, fallback)
+        # ── 4. Intelligent Merging ────────────────────────────────
+        local_primary  = extract_medicines_from_tokens(local_tokens)
+        local_fallback = extract_medicines_from_text(local_text, local_conf)
+        local_meds     = merge_medicine_lists(local_primary, local_fallback)
+
+        cloud_primary  = extract_medicines_from_tokens(cloud_tokens)
+        cloud_fallback = extract_medicines_from_text(cloud_text, cloud_conf)
+        cloud_meds     = merge_medicine_lists(cloud_primary, cloud_fallback)
+
+        if len(cloud_meds) > len(local_meds):
+            tokens_with_conf = cloud_tokens
+            full_text        = cloud_text
+            overall_conf     = cloud_conf
+            meds             = cloud_meds
+            print(f"[Ensemble] OCR.space Wins ({len(cloud_meds)} vs {len(local_meds)} meds)")
+        elif len(local_meds) > len(cloud_meds):
+            tokens_with_conf = local_tokens
+            full_text        = local_text
+            overall_conf     = local_conf
+            meds             = local_meds
+            print(f"[Ensemble] Tesseract Wins ({len(local_meds)} vs {len(cloud_meds)} meds)")
+        else:
+            tokens_with_conf = cloud_tokens + local_tokens
+            full_text        = cloud_text + "\n" + local_text
+            overall_conf     = max(cloud_conf, local_conf)
+            meds             = merge_medicine_lists(cloud_meds, local_meds)
+            print("[Ensemble] TIE: Merged both results safely")
 
         # ── 5. Demographics ───────────────────────────────────────
         patient = extract_patient_details(full_text)
