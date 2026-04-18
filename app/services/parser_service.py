@@ -19,7 +19,8 @@ from difflib import get_close_matches, SequenceMatcher
 KNOWN_MEDICINES = [
     "Betaloc", "Dorzolamidum", "Cimetidine", "Oxprelol",
     "Paracetamol", "Ibuprofen", "Amoxicillin", "Azithromycin",
-    "Metformin", "Omeprazole",
+    "Metformin", "Omeprazole", "Montac D", "Dolo", "Citrizin",
+    "Cetirizine", "Dolo 650", "Pan D"
 ]
 
 # Raw OCR variant (lowercase) → canonical label
@@ -36,10 +37,10 @@ _QTY_TAB_RE  = re.compile(r"([1-9IZz|l])\s*tab[s]?",        re.IGNORECASE)
 _DURATION_RE = re.compile(r"(\d+)\s*(day[s]?|week[s]?|month[s]?)", re.IGNORECASE)
 # Per-line regex handles OCR noise: "IO ms"→10mg, "|"→1 tab, "ID"→BID, "QV"→QD
 _MED_LINE_RE = re.compile(
-    r"(?P<n>[A-Za-z][A-Za-z]+)"
-    r"(?:\s+(?P<dosage>[0-9IO]{1,4}[\d.,]*\s*m[gs]))?"
+    r"(?P<n>[A-Za-z][A-Za-z]+(?:\s+[A-Za-z0-9]+)?)"
+    r"(?:\s+(?P<dosage>[0-9IO]{1,4}[\d.,]*\s*m[gs]|650))?"
     r"(?:\s*[-\u2013]\s*(?P<qty>[1-9IZz|l])(?:\s*tab[s]?)?)?"
-    r"(?:[\s\d.,]*(?P<freq>BID|TID|QD|OD|BD|QID|ID))?",
+    r"(?:[\s\d.,]*(?P<freq>BID|TID|QD|OD|BD|QID|ID|\d\s*-\s*\d\s*-\s*\d))?",
     re.IGNORECASE,
 )
 _QTY_OCRNORM  = {"I": "1", "l": "1", "|": "1", "Z": "2", "z": "2"}
@@ -136,9 +137,18 @@ def extract_medicines_from_tokens(tokens_with_conf):
 
         # ── Frequency ─────────────────────────────────────────
         if current["frequency"] is None:
-            freq = _normalise_freq(t)
-            if freq:
-                current["frequency"] = freq
+            clean_t = re.sub(r'\s+', '', t)
+            if re.match(r'^\d-\d-\d$', clean_t):
+                if clean_t == "1-0-1": current["frequency"] = "BID"
+                elif clean_t == "0-1-0": current["frequency"] = "OD"
+                elif clean_t in ("1-1-1", "1-1-1-1"): current["frequency"] = "TID"
+                elif clean_t == "1-0-0": current["frequency"] = "OD (Morning)"
+                elif clean_t == "0-0-1": current["frequency"] = "OD (Night)"
+                else: current["frequency"] = clean_t
+            else:
+                freq = _normalise_freq(t)
+                if freq:
+                    current["frequency"] = freq
 
         # ── Duration ──────────────────────────────────────────
         if current["duration"] is None:
@@ -186,7 +196,13 @@ def extract_medicines_from_text(full_text, overall_conf=0.0):
                     entry["quantity_per_dose"] = f"{q} tab"
             if m.group("freq"):
                 raw_freq = m.group("freq").upper()
-                entry["frequency"] = _FREQ_OCR_MAP.get(raw_freq, raw_freq)
+                clean_freq = re.sub(r'\s+', '', raw_freq)
+                if clean_freq == "1-0-1": entry["frequency"] = "BID"
+                elif clean_freq == "0-1-0": entry["frequency"] = "OD"
+                elif clean_freq in ("1-1-1", "1-1-1-1"): entry["frequency"] = "TID"
+                elif clean_freq == "1-0-0": entry["frequency"] = "OD (Morning)"
+                elif clean_freq == "0-0-1": entry["frequency"] = "OD (Night)"
+                else: entry["frequency"] = _FREQ_OCR_MAP.get(raw_freq, raw_freq)
             # Also catch QV (Tesseract misread of QD) anywhere in the line
             if not entry["frequency"] and re.search(r'\bQV\b', line, re.IGNORECASE):
                 entry["frequency"] = "QD"
@@ -298,3 +314,32 @@ def extract_doctor_details(full_text):
                 val = "Dr. " + val
             details[key] = val
     return details
+
+def is_prescription_document(full_text, meds, patient, doctor):
+    """
+    Returns (True, None) if the document seems valid.
+    Returns (False, string_reason) if it seems like a textbook, receipt, etc.
+    """
+    if meds or patient or doctor:
+        return True, None
+        
+    text = full_text.lower()
+    
+    # Check for medical keywords
+    keywords = ["rx", "clinic", "hospital", "prescription", "dr", "doctor", "patient", "tablet", "cap", "mg", "ml"]
+    found = sum(1 for k in keywords if re.search(r'\b' + k + r'\b', text))
+    
+    if found >= 2:
+        return True, None
+        
+    # Check for text-heavy academic/book content
+    non_med_keywords = ["chapter", "theory", "ethics", "syllabus", "academy"]
+    found_non_med = sum(1 for k in non_med_keywords if re.search(r'\b' + k + r'\b', text))
+    if found_non_med > 0:
+         return False, "The document provided appears to be academic/book content, not a prescription."
+         
+    # Check if text is just too sparse
+    if len(text.strip()) < 10:
+         return False, "Not enough text found to identify a prescription. Ensure the image is clear."
+
+    return False, "The document provided does not appear to be a prescription. No medications or patient details found."

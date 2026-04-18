@@ -198,90 +198,58 @@ class OCRService:
     # Public API
     # ──────────────────────────────────────────────
 
-    def extract_tokens(self, image_path):
+    def process_image(self, image_path):
         """
-        Run 4 preprocessing strategies × PSM modes 6 and 4.
-        Returns deduplicated list of (token_str, avg_confidence) sorted by confidence desc.
-        Minimum confidence threshold: 20.
+        Extracts both a token list and the full text string using a single Tesseract pass.
+        This resolves the Gunicorn timeout caused by running 17 Tesseract passes synchronously.
+        Uses Otsu upscale for best preservation of handwritten and printed text.
         """
-        strategies = self._get_strategies(image_path)
-        token_map  = {}
-        errors     = []
-
-        for name, processed in strategies:
-            for psm in [6, 4]:
+        bgr = cv2.imread(image_path)
+        if bgr is None:
+            raise ValueError(f"Cannot read image at path: {image_path}")
+            
+        processed = self._strategy_otsu(bgr)
+        
+        token_map = {}
+        best_text = ""
+        avg_conf = 0.0
+        
+        try:
+            # 1. Full text string directly
+            config = "--oem 3 --psm 6 -l eng"
+            best_text = pytesseract.image_to_string(processed, config=config)
+            
+            # 2. Token extraction with confidence
+            data = self._tesseract(processed, 6)
+            confs = []
+            for raw_text, raw_conf in zip(data["text"], data["conf"]):
+                text = raw_text.strip()
+                if not text:
+                    continue
                 try:
-                    data = self._tesseract(processed, psm)
-                    for raw, raw_conf in zip(data["text"], data["conf"]):
-                        text = raw.strip()
-                        if not text:
-                            continue
-                        try:
-                            conf = int(raw_conf)
-                        except (ValueError, TypeError):
-                            continue
-                        if conf < 20:
-                            continue
-                        token_map.setdefault(text.lower(), []).append((text, conf))
-                except Exception as e:
-                    errors.append(f"{name}/psm{psm}: {e}")
-
-        if errors:
-            print(f"[OCR] Non-fatal strategy errors: {errors}")
-
-        result = []
+                    conf = int(raw_conf)
+                except (ValueError, TypeError):
+                    continue
+                if conf < 20:   
+                    continue
+                confs.append(conf)
+                token_map.setdefault(text.lower(), []).append((text, conf))
+                
+            avg_conf = round(sum(confs) / len(confs), 1) if confs else 0.0
+            
+        except Exception as e:
+            print(f"[OCR] Process error: {e}")
+            
+        tokens = []
         for _key, entries in token_map.items():
-            best_text = max(entries, key=lambda x: x[1])[0]
-            avg_conf  = round(sum(c for _, c in entries) / len(entries), 1)
-            result.append((best_text, avg_conf))
-
-        result.sort(key=lambda x: -x[1])
-        print(f"[OCR] Extracted {len(result)} unique tokens")
-        return result
-
-    def get_full_text(self, image_path):
-        """
-        Return (full_text_str, avg_confidence) from the best single pass.
-        Uses image_to_string to preserve line structure (critical for prescription parsing).
-        Confidence is computed separately via image_to_data on the same best image.
-        """
-        strategies = self._get_strategies(image_path)
-        best_text  = ""
-        best_conf  = 0.0
-        best_image = None
-
-        # First pass: find best image by average confidence
-        for name, processed in strategies:
-            for psm in [6, 4]:
-                try:
-                    data  = self._tesseract(processed, psm)
-                    confs = []
-                    for raw_conf in data["conf"]:
-                        try:
-                            c = int(raw_conf)
-                        except (ValueError, TypeError):
-                            continue
-                        if c > 0:
-                            confs.append(c)
-                    avg = sum(confs) / len(confs) if confs else 0.0
-                    if avg > best_conf:
-                        best_conf  = avg
-                        best_image = (processed, psm)
-                except Exception as e:
-                    print(f"[OCR] get_full_text confidence pass error ({name}/psm{psm}): {e}")
-
-        # Second pass: extract line-preserved text from best image
-        if best_image is not None:
-            processed, psm = best_image
-            try:
-                config    = f"--oem 3 --psm {psm} -l eng"
-                best_text = pytesseract.image_to_string(processed, config=config)
-            except Exception as e:
-                print(f"[OCR] image_to_string error: {e}")
-                best_text = ""
-
-        print(f"[OCR] Full text (avg_conf={best_conf:.1f}):\n{best_text[:300]}")
-        return best_text, round(best_conf, 1)
-
+            best_token_text = max(entries, key=lambda x: x[1])[0]
+            avg_t_conf  = round(sum(c for _, c in entries) / len(entries), 1)
+            tokens.append((best_token_text, avg_t_conf))
+            
+        tokens.sort(key=lambda x: -x[1])
+        print(f"[OCR] Extracted {len(tokens)} unique tokens")
+        print(f"[OCR] Full text (avg_conf={avg_conf:.1f}):\n{best_text[:300]}")
+        
+        return tokens, best_text, avg_conf
 
 ocr_service = OCRService()

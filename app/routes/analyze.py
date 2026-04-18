@@ -16,6 +16,7 @@ from app.services.parser_service import (
     extract_patient_details,
     extract_doctor_details,
     merge_medicine_lists,
+    is_prescription_document,
 )
 
 analyze_bp    = Blueprint("analyze", __name__)
@@ -79,8 +80,7 @@ def analyze_prescription():
 
     try:
         # ── 3. OCR ────────────────────────────────────────────────
-        tokens_with_conf        = ocr_service.extract_tokens(filepath)
-        full_text, overall_conf = ocr_service.get_full_text(filepath)
+        tokens_with_conf, full_text, overall_conf = ocr_service.process_image(filepath)
 
         # ── 4. Parse ──────────────────────────────────────────────
         primary   = extract_medicines_from_tokens(tokens_with_conf)
@@ -90,6 +90,15 @@ def analyze_prescription():
         # ── 5. Demographics ───────────────────────────────────────
         patient = extract_patient_details(full_text)
         doctor  = extract_doctor_details(full_text)
+        
+        # ── 5.5 Document Validation ───────────────────────────────
+        is_valid, validation_msg = is_prescription_document(full_text, meds, patient, doctor)
+        if not is_valid:
+            _cleanup(filepath_to_clean)
+            return jsonify({
+                 "error": validation_msg,
+                 "is_prescription": False
+            }), 400
 
         # ── 6. Confidence summary ─────────────────────────────────
         med_confs    = [m["ocr_confidence"] for m in meds if m["ocr_confidence"] > 0]
