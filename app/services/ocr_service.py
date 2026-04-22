@@ -19,7 +19,6 @@ import shutil
 import os
 import subprocess
 import requests
-from app.services.advanced_handwriting_ocr import get_advanced_ocr
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -224,29 +223,18 @@ class OCRService:
 
     def process_image(self, image_path):
         """
-        Enhanced OCR processing with multiple strategies and advanced handwriting recognition.
-        Combines local Tesseract with advanced template matching for 90%+ confidence.
+        Enhanced OCR processing with multiple strategies.
+        Combines local Tesseract strategies sequentially.
         """
         bgr = cv2.imread(image_path)
         if bgr is None:
             raise ValueError(f"Cannot read image at path: {image_path}")
             
-        # Get advanced OCR analysis first
-        advanced_ocr = get_advanced_ocr()
-        adv_result = advanced_ocr.process_prescription_image(image_path)
-        
-        # If image quality is too poor, skip local OCR
-        if adv_result['recommendation'] == 'request_rescan':
-            print(f"[OCR] Image quality too poor, skipping OCR: {adv_result['reason']}")
-            return [], "", 0.0
-            
         # Run multiple OCR strategies
         strategies_results = self._run_all_strategies(image_path)
         
         # Merge results with confidence weighting
-        merged_tokens, merged_text, final_confidence = self._merge_ocr_results(
-            strategies_results, adv_result
-        )
+        merged_tokens, merged_text, final_confidence = self._merge_ocr_results(strategies_results)
         
         print(f"[OCR.Enhanced] Extracted {len(merged_tokens)} unique tokens")
         print(f"[OCR.Enhanced] Final confidence: {final_confidence:.1f}%")
@@ -312,8 +300,8 @@ class OCRService:
         
         return results
     
-    def _merge_ocr_results(self, strategies_results, adv_result):
-        """Merge results from multiple strategies with advanced OCR insights."""
+    def _merge_ocr_results(self, strategies_results):
+        """Merge results from multiple strategies."""
         # Collect all unique tokens with their best confidence
         token_conf_map = {}
         
@@ -332,21 +320,15 @@ class OCRService:
         # Sort by confidence
         merged_tokens.sort(key=lambda x: -x[1])
         
+        if not strategies_results:
+            return merged_tokens, "", 0.0
+            
         # Select best full text (highest confidence strategy)
         best_strategy = max(strategies_results, key=lambda x: x['confidence'])
         merged_text = best_strategy['text']
         
-        # Calculate final confidence incorporating advanced OCR
-        strategy_avg_conf = sum(r['confidence'] for r in strategies_results) / len(strategies_results)
-        adv_conf = adv_result.get('overall_confidence', 50.0)
-        
-        # Weight: 70% from OCR strategies, 30% from advanced analysis
-        final_confidence = (strategy_avg_conf * 0.7 + adv_conf * 0.3)
-        
-        # Boost confidence if we have good handwriting templates
-        handwriting_templates = adv_result.get('handwriting_templates_available', 0)
-        if handwriting_templates > 20:
-            final_confidence = min(95.0, final_confidence + 10.0)
+        # Calculate final confidence
+        final_confidence = sum(r['confidence'] for r in strategies_results) / len(strategies_results)
         
         return merged_tokens, merged_text, round(final_confidence, 1)
     
@@ -377,22 +359,6 @@ class OCRService:
             print(f"[OCR.Fallback] Cloud OCR failed: {e}, using local results")
             return tokens, text, local_conf
     
-    def enhance_tokens_with_handwriting(self, tokens, image_path):
-        """
-        Enhance OCR tokens using advanced handwriting template matching.
-        """
-        advanced_ocr = get_advanced_ocr()
-        enhanced = advanced_ocr.enhance_ocr_tokens(tokens, image_quality=80.0)
-        
-        # Return enhanced tokens with improved confidence
-        enhanced_tokens = []
-        for item in enhanced:
-            enhanced_tokens.append((
-                item['matched_character'] if item['template_confidence'] > 60 else item['original_token'],
-                item['blended_confidence']
-            ))
-        
-        return enhanced_tokens
 
     def process_image_cloud(self, image_path, api_key="K86023808588957"):
         """
