@@ -19,3 +19,7 @@ numpy>=1.26.0
 
 # ── Cloud APIs ────────────────────────────────────────────────────
 requests>=2.31.0
+
+# ── Advanced image/signal processing ───────────────────────────────
+scipy>=1.11.0
+scikit-image>=0.22.0
