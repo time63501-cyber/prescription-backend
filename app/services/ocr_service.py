@@ -98,38 +98,12 @@ def _setup_tesseract():
         _verify(found)
         return
 
-    # ── Not found: install via apt-get at runtime ──────────────────
-    # This is the guaranteed fallback for Railway containers
-    print("[Tesseract] Not in PATH — running apt-get install...")
-    try:
-        subprocess.run(["apt-get", "update", "-qq"],
-                       check=True, timeout=60)
-        subprocess.run(
-            ["apt-get", "install", "-y", "--no-install-recommends",
-             "tesseract-ocr", "tesseract-ocr-eng",
-             "libgl1", "libglib2.0-0"],
-            check=True, timeout=120
-        )
-        print("[Tesseract] apt-get install done")
-    except subprocess.CalledProcessError as e:
-        print(f"[Tesseract] apt-get failed (exit {e.returncode}): {e}")
-    except subprocess.TimeoutExpired:
-        print("[Tesseract] apt-get timed out after 120s")
-    except FileNotFoundError:
-        print("[Tesseract] apt-get binary not found on this system")
-    except Exception as e:
-        print(f"[Tesseract] apt-get unexpected error: {e}")
-
-    # ── Re-search after install attempt ───────────────────────────
-    found = _find_tesseract()
-    if found:
-        pytesseract.pytesseract.tesseract_cmd = found
-        print(f"[Tesseract] Now available: {found}")
-        _verify(found)
-    else:
-        print("[Tesseract] FATAL: tesseract still not found — dumping debug info")
-        _dump_debug()
-
+    # ── Not found: runtime installation via python is dangerous on remote containers ──
+    print("[Tesseract] WARN: Not in PATH. Ensure Nixpacks/Railway is configured to install tesseract-ocr.")
+    
+    # ── Fallback dump ──
+    _dump_debug()
+    return
 
 _setup_tesseract()
 
