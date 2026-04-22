@@ -19,6 +19,40 @@ from difflib import get_close_matches, SequenceMatcher
 from app.services.medicine_db import MEDICINE_INFO
 KNOWN_MEDICINES = list(MEDICINE_INFO.keys())
 
+def extract_unidentified_medicine_count(full_text: str, identified_meds: list) -> int:
+    """
+    Sweeps the OCR text for indicators (Tab, Cap, Syr, Rx) that usually 
+    precede a medicine. If it finds an indicator line that does not 
+    correspond to an identified medicine, it counts as an 'unidentified' medicine.
+    """
+    indicators = ['tab', 'cap', 'syr', 'inj', 'rx', 'mg', 'ml', 'drop']
+    unidentified = 0
+    identified_names = [m["medicine_name"].lower() for m in identified_meds]
+    
+    for line in full_text.lower().splitlines():
+        line = line.strip()
+        # Does the line contain a medicine indicator?
+        matches_indicator = any(re.search(r'\b' + ind + r'\b', line) for ind in indicators)
+        
+        # Does the line contain a number/dosage pattern usually found in medicine lines?
+        matches_dosage = bool(re.search(r'\d+\s*(mg|ml|gm|mcg)', line))
+        
+        if matches_indicator or matches_dosage:
+            # Did we successfully identify a mapped medicine in this line?
+            has_mapped_medicine = False
+            for med in identified_names:
+                # Naive check if the identified medicine is somewhat in this line
+                # Break it down in case of multi-word like "pan 40"
+                if any(part in line for part in med.split()):
+                    has_mapped_medicine = True
+                    break
+                    
+            if not has_mapped_medicine:
+                unidentified += 1
+                
+    # Unidentified shouldn't accidentally count patient details "Age: 17 Year" "10/12/25"
+    return unidentified
+
 # Raw OCR variant (lowercase) → canonical label
 FREQ_MAP = {
     "bid": "BID", "b.i.d": "BID", "b.i.d.": "BID",

@@ -17,6 +17,7 @@ from app.services.parser_service import (
     extract_doctor_details,
     merge_medicine_lists,
     is_prescription_document,
+    extract_unidentified_medicine_count,
 )
 
 analyze_bp    = Blueprint("analyze", __name__)
@@ -131,9 +132,20 @@ def analyze_prescription():
 
         # ── 6. Confidence summary ─────────────────────────────────
         med_confs    = [m["ocr_confidence"] for m in meds if m["ocr_confidence"] > 0]
-        summary_conf = round(
-            sum(med_confs) / len(med_confs) if med_confs else overall_conf, 1
-        )
+        base_conf    = round(sum(med_confs) / len(med_confs), 1) if med_confs else overall_conf
+        
+        # Adjust confidence based on unidentified medicines
+        unidentified_count = extract_unidentified_medicine_count(full_text, meds)
+        identified_count = len(meds)
+        
+        if identified_count == 0 and unidentified_count > 0:
+            summary_conf = 0.0
+        elif identified_count == 0 and unidentified_count == 0:
+            summary_conf = 0.0
+        else:
+            total_med_tokens = identified_count + unidentified_count
+            ratio = identified_count / total_med_tokens if total_med_tokens > 0 else 1.0
+            summary_conf = round(base_conf * ratio, 1)
 
         _cleanup(filepath_to_clean)
 
